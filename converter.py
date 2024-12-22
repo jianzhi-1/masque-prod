@@ -9,11 +9,14 @@ import torchaudio
 import librosa
 import argparse
 
-assert torch.cuda.is_available()
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+    print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+else:
+    device = torch.device("cpu")
+    print("Using CPU")
 
-coder = load_model("en", device="cuda:0")
-device = torch.device("cuda")
-print("Using device:", device)
+coder = load_model("en", device=device)
 
 hifi_gan = HIFIGAN.from_hparams(source="speechbrain/tts-hifigan-ljspeech", savedir="tmpdir_vocoder")
 tacotron2 = Tacotron2.from_hparams(source="speechbrain/tts-tacotron2-ljspeech", savedir="tmpdir_tts")
@@ -48,9 +51,9 @@ def predict_unknown(model, text, emotion, filename):
     }
 
     model.eval()
-    transcript_to_audio(text, filename)
+    transcript_to_audio(text, f"{filename}_temp.wav")
     
-    waveform, sr = librosa.load(filename, sr=None)
+    waveform, sr = librosa.load(f"{filename}_temp.wav", sr=None)
     assert sr == 22050
 
     ai_sparc = coder.encode(
@@ -126,14 +129,14 @@ def predict_unknown(model, text, emotion, filename):
         spk_emb=spk_emb
     )
 
-    torchaudio.save(f"{filename}_pred.wav", torch.tensor(wav_pred).unsqueeze(0), coder.sr)
+    torchaudio.save(f"{filename}.wav", torch.tensor(wav_pred).unsqueeze(0), coder.sr)
 
 def main():
     
     transformer_encoder_model = TransformerEmotionModel(d_model=512, num_encoder_layers=6, dropout=0.1)
     transformer_encoder_model.to(device)
 
-    transformer_encoder_model.load_state_dict(torch.load("./sparc-model-weights.pt"))
+    transformer_encoder_model.load_state_dict(torch.load("./sparc-model-weights.pt", map_location=device, weights_only=True))
 
     parser = argparse.ArgumentParser()
     parser.add_argument("transcript", type=str, help="transcript")
@@ -141,7 +144,7 @@ def main():
     parser.add_argument("filename", type=str, help="filename")
     args = parser.parse_args()
 
-    predict_unknown(transformer_encoder_model, args.transcript, args.label, f"{args.filename}.wav")
+    predict_unknown(transformer_encoder_model, args.transcript, args.label, args.filename)
 
 
 if __name__ == "__main__":
